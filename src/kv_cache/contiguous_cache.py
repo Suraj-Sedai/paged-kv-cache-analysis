@@ -1,6 +1,9 @@
 import torch
 
-class ContiguousKVCache:
+from src.kv_cache.base import BaseKVCache
+
+
+class ContiguousKVCache(BaseKVCache):
     def __init__(self, config, batch_size, max_seq_len, device=None, dtype=torch.float32):
         """
         Initialize the KV cache with preallocated memory.
@@ -80,7 +83,6 @@ class ContiguousKVCache:
         self.keys.zero_()
         self.values.zero_()
 
-    @property
-    def memory_bytes(self):
+    def memory_bytes(self) -> int:
         return self.keys.numel() * self.keys.element_size() + self.values.numel() * self.values.element_size()
         
