@@ -1,0 +1,102 @@
+# Python virtual environments
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+document/
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+pytest_cache/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# pyenv
+.python-version
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# IDE / editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# CUDA / compiled extensions
+*.so
+*.cu.o
+*.ptx
+
+# Model weights and large binary files
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.gguf
+
+# Logs
+*.log
+logs/
+.dist/
+experiments/results/*.csv
+experiments/results/*.json
+!experiments/results/.gitkeep
+!experiments/results/sample_results.csv
+!experiments/results/sample_results_config.json
+!experiments/results/2026-05-31_18-00-05_sequence_length.csv
+!experiments/results/2026-05-31_18-00-05_sequence_length_config.json
+!experiments/results/2026-05-31_18-00-15_batch_size.csv
+!experiments/results/2026-05-31_18-00-15_batch_size_config.json
+!experiments/results/2026-05-31_18-00-21_cache_comparison.csv
+!experiments/results/2026-05-31_18-00-21_cache_comparison_config.json
+!experiments/results/2026-05-31_18-00-30_prefill_decode.csv
+!experiments/results/2026-05-31_18-00-30_prefill_decode_config.json
+
+# Secrets / environment configs
+.env
+.env.*
+secrets.yaml
+secrets.json
+
+docs/
