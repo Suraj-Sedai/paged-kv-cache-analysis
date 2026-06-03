@@ -79,19 +79,7 @@ Thumbs.db
 *.log
 logs/
 .dist/
-experiments/results/*.csv
-experiments/results/*.json
-!experiments/results/.gitkeep
-!experiments/results/sample_results.csv
-!experiments/results/sample_results_config.json
-!experiments/results/2026-05-31_18-00-05_sequence_length.csv
-!experiments/results/2026-05-31_18-00-05_sequence_length_config.json
-!experiments/results/2026-05-31_18-00-15_batch_size.csv
-!experiments/results/2026-05-31_18-00-15_batch_size_config.json
-!experiments/results/2026-05-31_18-00-21_cache_comparison.csv
-!experiments/results/2026-05-31_18-00-21_cache_comparison_config.json
-!experiments/results/2026-05-31_18-00-30_prefill_decode.csv
-!experiments/results/2026-05-31_18-00-30_prefill_decode_config.json
+
 
 # Secrets / environment configs
 .env

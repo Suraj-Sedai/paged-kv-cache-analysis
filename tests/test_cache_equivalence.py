@@ -1,30 +1,3 @@
-"""
-Verifies that PagedKVCache and ContiguousKVCache produce identical outputs
-for the same inputs.
-
-PREREQUISITE — two bugs in paged.py must be fixed before these tests pass:
-
-  1. PagedKVCache.write() must NOT call self.advance() internally.
-     The model calls advance() once after all layers write; if write() also
-     calls it, curr_len grows n_layers times too fast and each layer writes
-     to the wrong position.
-
-  2. PagedKVCache must expose a `current_seq_len` property (or rename
-     curr_len). model.py reads kv_cache.current_seq_len to compute start_pos.
-
-Fix for bug 1 — remove the last line from write():
-    def write(self, layer_idx, k, v, start_pos):
-        ...
-        self._write_tokens(self.k_pages, layer_idx, k)
-        self._write_tokens(self.v_pages, layer_idx, v)
-        # self.advance(t_new)   <-- delete this line
-
-Fix for bug 2 — add a property to PagedKVCache:
-    @property
-    def current_seq_len(self):
-        return self.curr_len
-"""
-
 import pytest
 import torch
 
