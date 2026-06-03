@@ -20,3 +20,7 @@ class BaseKVCache(ABC):
     @abstractmethod
     def memory_bytes(self) -> int:
         pass   
+
+    @abstractmethod
+    def fragmentation_ratio(self) -> float:
+        pass

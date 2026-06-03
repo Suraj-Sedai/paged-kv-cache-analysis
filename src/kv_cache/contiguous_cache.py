@@ -86,3 +86,8 @@ class ContiguousKVCache(BaseKVCache):
     def memory_bytes(self) -> int:
         return self.keys.numel() * self.keys.element_size() + self.values.numel() * self.values.element_size()
         
+    def fragmentation_ratio(self) -> float:
+        total_positions = self.max_seq_len * self.batch_size * self.num_heads * self.head_dim
+        used_positions = self.current_seq_len * self.batch_size * self.num_heads * self.head_dim
+        unused_positions = total_positions - used_positions
+        return unused_positions / total_positions if total_positions > 0 else 0.0

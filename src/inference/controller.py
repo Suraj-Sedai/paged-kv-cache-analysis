@@ -3,12 +3,14 @@ from typing import Optional
 
 import torch
 
+from src.kv_cache.base import BaseKVCache
 from src.kv_cache.contiguous_cache import ContiguousKVCache
 from src.inference.sampling import SamplingConfig, sample_next_token
 from src.model_core.config import ModelConfig
 from src.profiling.memory import peak_memory_mb, reset_peak_memory
 from src.profiling.metrics import GenerationMetrics, build_generation_metrics
 from src.profiling.timer import elapsed_ms, measure_ms, now_seconds
+from src.kv_cache.base import BaseKVCache
 
 
 @dataclass
@@ -17,7 +19,6 @@ class GenerationResult:
     num_prompt_tokens: int
     num_generated_tokens: int
     metrics: GenerationMetrics
-
 
 class InferenceController:
     def __init__(self, model, config: ModelConfig):
@@ -31,6 +32,7 @@ class InferenceController:
         eos_token_id: Optional[int] = None,
         sampling_config: Optional[SamplingConfig] = None,
         use_cache: bool = True,
+        cache:BaseKVCache = None,
     ) -> GenerationResult:
         if input_ids.ndim != 2:
             raise ValueError("input_ids must have shape [B, T]")
