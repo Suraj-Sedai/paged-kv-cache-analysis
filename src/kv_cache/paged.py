@@ -133,19 +133,12 @@ class PagedKVCache(BaseKVCache):
         self._write_tokens(self.k_pages, layer_idx, k)
         self._write_tokens(self.v_pages, layer_idx, v)
         
-        self.advance(t_new)
+        # self.advance(t_new)
 
     def read(self, layer_idx, upto_pos):
-        """Write new K/V into pages and return a contiguous tensor for attention."""
-        _, _, t_new, _ = k.shape
-        if self.curr_len + t_new > self.max_seq_len:
-            raise ValueError("KV cache out of capacity!")
-
-        self.write(layer_idx, k, v, self.curr_len)
-        end_pos = self.curr_len + t_new
         return (
-            self._materialize(self.k_pages, layer_idx, end_pos),
-            self._materialize(self.v_pages, layer_idx, end_pos),
+        self._materialize(self.k_pages, layer_idx, upto_pos),
+        self._materialize(self.v_pages, layer_idx, upto_pos),
         )
 
     def reset(self):
@@ -174,3 +167,6 @@ class PagedKVCache(BaseKVCache):
         total_pages = self.max_pages
         return used_pages / total_pages if total_pages > 0 else 0.0
     
+    @property
+    def current_seq_len(self):
+        return self.curr_len

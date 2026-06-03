@@ -72,7 +72,7 @@ class InferenceController:
                 metrics=metrics,
             )
 
-        cache = None
+        # cache = None
         if use_cache:
             cache_dtype = next(self.model.parameters()).dtype
             cache = ContiguousKVCache(
