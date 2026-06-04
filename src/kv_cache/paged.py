@@ -154,6 +154,10 @@ class PagedKVCache(BaseKVCache):
             raise ValueError("Cannot advance KV cache beyond maximum sequence length.")
         self.curr_len = new_len
 
+    @property
+    def current_seq_len(self):
+        return self.curr_len
+
     def memory_bytes(self) -> int:
         """Calculate total memory usage of the KV cache."""
         #sum of k_pages + v_pages size
@@ -162,10 +166,13 @@ class PagedKVCache(BaseKVCache):
         return k_bytes + v_bytes
     
     def fragmentation_ratio(self) -> float:
-        """Calculate the fragmentation ratio of the cache."""
-        used_pages = self._num_used_pages()
-        total_pages = self.max_pages
-        return used_pages / total_pages if total_pages > 0 else 0.0
+        """Wasted slots in the last page divided by page_size (0.0–1.0)."""
+        if self.curr_len == 0:
+            return 0.0
+        tokens_in_last_page = self.curr_len % self.page_size
+        if tokens_in_last_page == 0:
+            return 0.0
+        return (self.page_size - tokens_in_last_page) / self.page_size
     
     @property
     def current_seq_len(self):
