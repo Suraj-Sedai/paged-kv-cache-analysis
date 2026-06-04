@@ -17,24 +17,44 @@ DECODE_LEN  = 60
 N_WARMUP    = 3
 N_MEASURE   = 5
 
-OUTPUT_PATH = os.path.join("experiments", "results", "exp1_layout_comparison.csv")
+OUTPUT_PATH = os.path.join("experiments", "results", "exp1_layout_comparison2.csv")
 FIELDNAMES  = ["cache_type", "seq_len", "batch", "block_size",
                "ttft_ms", "tpot_ms", "throughput", "memory_mb", "frag_ratio"]
 
 
-def make_cache(cache_type, model_config, batch_size, max_seq_len, device):
+
+def make_cache(cache_type, model_config, batch_size, max_seq_len, device, io_dtype):
+    """Both caches now implement the per-seq_id BaseKVCache interface that
+    attention/controller drive directly (write/read/advance/free keyed by the
+    batch index), so no adapter is needed.
+
+    Contiguous matches the model dtype so attention's float matmuls line up.
+    Paged is fixed to float16 page storage (its live read tensors carry the
+    model dtype), and is given a shared pool sized for all `batch_size` seqs.
+    """
     if cache_type == "contiguous":
-        return ContiguousKVCache(model_config, batch_size, max_seq_len, device)
-    num_blocks = (max_seq_len + BLOCK_SIZE - 1) // BLOCK_SIZE
+        return ContiguousKVCache(model_config, max_seq_len, device, dtype=io_dtype)
+    per_seq_blocks = (max_seq_len + BLOCK_SIZE - 1) // BLOCK_SIZE
     return PagedKVCache(
         n_layers=model_config.n_layers,
         n_heads=model_config.n_heads,
         dim_head=model_config.head_dim,
         block_size=BLOCK_SIZE,
-        num_blocks=num_blocks,
+        num_blocks=per_seq_blocks * batch_size,  # shared pool across all seqs
         device=device,
-        batch_size=batch_size,
+        dtype=torch.float16,
     )
+
+
+def theoretical_frag(cache_type, length, max_seq_len):
+    """Fragmentation at a given filled length, mirroring each cache's own
+    fragmentation_ratio(). Computed analytically because controller.generate()
+    frees every seq during cleanup, so the cache is empty by the time we report.
+    """
+    if cache_type == "contiguous":
+        return (max_seq_len - length) / max_seq_len  # reserved-but-unused waste
+    rem = length % BLOCK_SIZE                          # last-page internal waste
+    return 0.0 if rem == 0 else (BLOCK_SIZE - rem) / BLOCK_SIZE
 
 
 def run_one(model, model_config, cache, prompt_ids):
@@ -56,18 +76,19 @@ def main():
                 max_seq_len = seq_len + DECODE_LEN
                 model_config = ModelConfig(max_seq_len=max_seq_len)
                 model = GPTModel(model_config).to(device)
+                io_dtype = next(model.parameters()).dtype
                 prompt_ids = torch.randint(
                     0, model_config.vocab_size, (batch, seq_len), device=device
                 )
 
                 try:
                     for _ in range(N_WARMUP):
-                        cache = make_cache(cache_type, model_config, batch, max_seq_len, device)
+                        cache = make_cache(cache_type, model_config, batch, max_seq_len, device, io_dtype)
                         run_one(model, model_config, cache, prompt_ids)
 
                     metrics_list = []
                     for _ in range(N_MEASURE):
-                        cache = make_cache(cache_type, model_config, batch, max_seq_len, device)
+                        cache = make_cache(cache_type, model_config, batch, max_seq_len, device, io_dtype)
                         result = run_one(model, model_config, cache, prompt_ids)
                         metrics_list.append(result.metrics)
 
@@ -80,7 +101,7 @@ def main():
                         "tpot_ms":    round(statistics.median(m.tpot_avg_ms for m in metrics_list), 3),
                         "throughput": round(statistics.median(m.throughput_tokens_per_sec for m in metrics_list), 1),
                         "memory_mb":  round(statistics.median(m.peak_memory_mb for m in metrics_list), 2),
-                        "frag_ratio": round(cache.fragmentation_ratio(), 4),
+                        "frag_ratio": round(theoretical_frag(cache_type, seq_len + DECODE_LEN, max_seq_len), 4),
                     }
 
                 except torch.cuda.OutOfMemoryError:

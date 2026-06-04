@@ -40,15 +40,20 @@ class MultiHeadSelfAttention(nn.Module):
         q = q / (Hd**0.5)
 
         if use_cache:
-            kv_cache.write(layer_idx, k, v, start_pos)
-            k, v = kv_cache.read(layer_idx, start_pos + T)
+            out_k, out_v = [], []
+            for b in range(B):
+                kv_cache.write(layer_idx, b, k[b], v[b])   # k[b]: [H, T, Hd], seq_id = b
+                kb, vb = kv_cache.read(layer_idx, b)        # [H, n, Hd]
+                out_k.append(kb)
+                out_v.append(vb)
+            k = torch.stack(out_k, dim=0)                   # [B, H, n, Hd]
+            v = torch.stack(out_v, dim=0)
 
             if T > 1:
                 key_len = k.size(2)
                 query_positions = torch.arange(start_pos, start_pos + T, device=x.device)
                 key_positions = torch.arange(key_len, device=x.device)
-                causal_mask = key_positions.unsqueeze(0) <= query_positions.unsqueeze(1)
-                causal_mask = causal_mask.view(1, 1, T, key_len)
+                causal_mask = (key_positions.unsqueeze(0) <= query_positions.unsqueeze(1)).view(1, 1, T, key_len)
             else:
                 causal_mask = None
         else:

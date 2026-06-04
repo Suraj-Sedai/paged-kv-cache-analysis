@@ -2,15 +2,19 @@ from abc import ABC, abstractmethod
 
 class BaseKVCache(ABC):
     @abstractmethod
-    def write(self, layer_idx, k, v, start_pos):
+    def write(self, layer_idx, seq_id, k, v):
         pass
 
     @abstractmethod
-    def read(self, layer_idx, upto_pos):
+    def read(self, layer_idx, seq_id):
         pass
 
     @abstractmethod
-    def advance(self, amount):
+    def advance(self, seq_id, amount=1):
+        pass
+
+    @abstractmethod
+    def free(self, seq_id):
         pass
 
     @abstractmethod
@@ -19,8 +23,8 @@ class BaseKVCache(ABC):
 
     @abstractmethod
     def memory_bytes(self) -> int:
-        pass   
+        pass
 
     @abstractmethod
-    def fragmentation_ratio(self) -> float:
+    def fragmentation_ratio(self, seq_id) -> float:
         pass

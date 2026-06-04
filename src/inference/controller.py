@@ -10,7 +10,6 @@ from src.model_core.config import ModelConfig
 from src.profiling.memory import peak_memory_mb, reset_peak_memory
 from src.profiling.metrics import GenerationMetrics, build_generation_metrics
 from src.profiling.timer import elapsed_ms, measure_ms, now_seconds
-from src.kv_cache.base import BaseKVCache
 
 
 @dataclass
@@ -32,7 +31,7 @@ class InferenceController:
         eos_token_id: Optional[int] = None,
         sampling_config: Optional[SamplingConfig] = None,
         use_cache: bool = True,
-        cache:BaseKVCache = None,
+        cache: BaseKVCache = None,
     ) -> GenerationResult:
         if input_ids.ndim != 2:
             raise ValueError("input_ids must have shape [B, T]")
@@ -49,9 +48,7 @@ class InferenceController:
             raise ValueError("Requested generation exceeds model max_seq_len")
 
         output = torch.empty(
-            (batch_size, total_len),
-            dtype=input_ids.dtype,
-            device=input_ids.device,
+            (batch_size, total_len), dtype=input_ids.dtype, device=device,
         )
         output[:, :prompt_len] = input_ids
 
@@ -76,7 +73,6 @@ class InferenceController:
             cache_dtype = next(self.model.parameters()).dtype
             cache = ContiguousKVCache(
                 config=self.config,
-                batch_size=batch_size,
                 max_seq_len=total_len,
                 device=device,
                 dtype=cache_dtype,
@@ -84,9 +80,15 @@ class InferenceController:
 
         self.model.eval()
         decode_step_times_ms = []
+        actual_len = prompt_len
+
         with torch.no_grad():
+            # ---- PREFILL ----
             with measure_ms(device) as prefill_timer:
-                logits = self.model(input_ids, kv_cache=cache, use_cache=use_cache)
+                logits = self.model(input_ids, kv_cache=cache, use_cache=use_cache, start_pos=0)
+            if use_cache:
+                for b in range(batch_size):
+                    cache.advance(b, prompt_len)
 
             with measure_ms(device) as first_sample_timer:
                 next_token = sample_next_token(
@@ -97,8 +99,8 @@ class InferenceController:
             decode_step_times_ms.append(first_sample_timer.elapsed_ms)
 
             finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
-            actual_len = prompt_len
 
+            # ---- DECODE ----
             for step in range(max_new_tokens):
                 position = prompt_len + step
                 output[:, position] = next_token.squeeze(-1)
@@ -114,7 +116,11 @@ class InferenceController:
 
                 with measure_ms(device) as decode_timer:
                     if use_cache:
-                        logits = self.model(next_token, kv_cache=cache, use_cache=True)
+                        logits = self.model(
+                            next_token, kv_cache=cache, use_cache=True, start_pos=position,
+                        )
+                        for b in range(batch_size):
+                            cache.advance(b, 1)
                     else:
                         logits = self.model(output[:, :actual_len], use_cache=False)
                     next_token = sample_next_token(
@@ -123,6 +129,11 @@ class InferenceController:
                         config=sampling_config,
                     )
                 decode_step_times_ms.append(decode_timer.elapsed_ms)
+
+            # ---- CLEANUP ----
+            if use_cache:
+                for b in range(batch_size):
+                    cache.free(b)
 
         generation_end = now_seconds(device)
         num_generated_tokens = actual_len - prompt_len
