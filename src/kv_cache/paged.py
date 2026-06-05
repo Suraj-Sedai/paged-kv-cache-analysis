@@ -5,13 +5,20 @@ from src.kv_cache.base import BaseKVCache
 
 
 class PagedKVCache(BaseKVCache):
-    """Manages KV cache using fixed-size pages to reduce fragmentation."""
+    """Manages KV cache using fixed-size pages to reduce fragmentation.
 
-    def __init__(self, n_layers, n_heads, dim_head, block_size, num_blocks, device, dtype=torch.float16):
+    Storage is the page pool only — read() reconstructs a sequence's K/V by
+    gathering its physical pages on demand (the real paged-attention cost). No
+    shadow contiguous copy is kept, so memory_bytes() reflects true occupancy.
+
+    dtype is caller-chosen and should match the contiguous cache so a layout
+    comparison isolates layout (not precision); precision is a separate axis.
+    """
+
+    def __init__(self, n_layers, n_heads, dim_head, block_size, num_blocks, device, dtype=torch.float32):
         self.n_layers, self.n_heads, self.head_dim = n_layers, n_heads, dim_head
         self.page_size, self.num_blocks = block_size, num_blocks
         self.device, self.dtype = device, dtype
-        assert dtype == torch.float16, "match contiguous cache precision"
 
         # pool: [num_blocks, n_layers, n_heads, block_size, head_dim] — NO batch dim
         self.k_pages = torch.zeros(num_blocks, n_layers, n_heads, block_size, dim_head, device=device, dtype=dtype)
@@ -19,9 +26,8 @@ class PagedKVCache(BaseKVCache):
 
         self.free_pages = list(range(num_blocks))   # single global pool
         self.page_table = {}                        # seq_id -> [physical_page, ...]
-        self.seq_len    = {}                        # seq_id -> int
-        self.k_live = {}   # seq_id -> [n_layers] list of [n_heads, cur_len, head_dim]
-        self.v_live = {}
+        self.seq_len    = {}                        # seq_id -> logical length (advance())
+        self.filled     = {}                        # seq_id -> written extent (write())
 
     def _ensure_capacity(self, seq_id, total_len):
         pages = self.page_table.setdefault(seq_id, [])
@@ -34,8 +40,7 @@ class PagedKVCache(BaseKVCache):
     def free(self, seq_id):                          # call on sequence completion
         self.free_pages.extend(self.page_table.pop(seq_id, []))
         self.seq_len.pop(seq_id, None)
-        self.k_live.pop(seq_id, None)
-        self.v_live.pop(seq_id, None)
+        self.filled.pop(seq_id, None)
 
     def write(self, layer_idx, seq_id, k, v):
         t_new = k.shape[1]
@@ -50,23 +55,26 @@ class PagedKVCache(BaseKVCache):
             self.k_pages[phys, layer_idx, :, off:off+chunk, :].copy_(k[:, written:written+chunk, :])
             self.v_pages[phys, layer_idx, :, off:off+chunk, :].copy_(v[:, written:written+chunk, :])
             written += chunk
-        if seq_id not in self.k_live:
-            self.k_live[seq_id] = [None] * self.n_layers
-            self.v_live[seq_id] = [None] * self.n_layers
-
-        kl, vl = self.k_live[seq_id][layer_idx], self.v_live[seq_id][layer_idx]
-        self.k_live[seq_id][layer_idx] = k if kl is None else torch.cat([kl, k], dim=1)
-        self.v_live[seq_id][layer_idx] = v if vl is None else torch.cat([vl, v], dim=1)
+        self.filled[seq_id] = start + t_new
 
     def read(self, layer_idx, seq_id):
-        return self.k_live[seq_id][layer_idx], self.v_live[seq_id][layer_idx]
+        """Gather the sequence's physical pages into a contiguous [H, n, Hd] view."""
+        n = self.filled[seq_id]                       # KeyError if never written / freed
+        pages = self.page_table[seq_id]
+        need = (n + self.page_size - 1) // self.page_size
+        phys = pages[:need]
+        k = self.k_pages[phys, layer_idx]             # [P, H, page_size, Hd]
+        v = self.v_pages[phys, layer_idx]
+        P, H, ps, Hd = k.shape
+        k = k.permute(1, 0, 2, 3).reshape(H, P * ps, Hd)[:, :n, :]
+        v = v.permute(1, 0, 2, 3).reshape(H, P * ps, Hd)[:, :n, :]
+        return k, v
 
     def reset(self):
         self.free_pages = list(range(self.num_blocks))
         self.page_table = {}
         self.seq_len = {}
-        self.k_live = {}
-        self.v_live = {}
+        self.filled = {}
 
     def advance(self, seq_id, amount=1):
         self.seq_len[seq_id] = self.seq_len.get(seq_id, 0) + amount

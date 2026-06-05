@@ -1,3 +1,17 @@
+"""Experiment 2 — paged KV cache block-size sweep.
+
+Question: how does block_size trade fragmentation against per-token lookup
+overhead? Smaller blocks -> finer packing (lower fragmentation) but more pages
+to gather per read; larger blocks -> cheaper gather but coarser last-page waste.
+
+seq_lens are deliberately NON-multiples of the block sizes so fragmentation
+actually varies (powers of two give zero waste -> a flat, useless Figure 2).
+
+NOTE: decode on this GPU is launch-bound (see Exp 1, CV up to ~26%), so the
+fragmentation/memory columns are the clean signal; TPOT-vs-block_size may stay
+within the noise. A flat TPOT curve here is the known launch-bound regime, not
+a new bug.
+"""
 import csv
 import os
 import statistics
@@ -6,61 +20,48 @@ import time
 import torch
 
 from src.inference.controller import InferenceController
-from src.kv_cache.contiguous_cache import ContiguousKVCache
 from src.kv_cache.paged import PagedKVCache
 from src.model_core.config import ModelConfig
 from src.model_core.model import GPTModel
 
-# moderate model (8L/8H/512d). Decode is launch-bound at this scale on consumer
-# GPUs, so the timing columns are reported with CV and read as flat/noise; the
-# clean, deterministic signal is memory (see cache_memory_mb / frag_ratio).
 N_LAYERS, N_HEADS, D_MODEL, D_FF = 8, 8, 512, 2048
 
-SEQ_LENS    = [128, 256, 512, 1024, 2048]
-BATCH_SIZES = [1, 4, 8, 16]
-BLOCK_SIZE  = 16
+BLOCK_SIZES = [8, 16, 32, 64]
+SEQ_LENS    = [100, 300, 600, 1100, 2000]   # non-multiples -> frag varies
+BATCH_SIZES = [1, 8, 16]
 DECODE_LEN  = 60
 N_WARMUP    = 3
 N_MEASURE   = 20
-BUDGET_S    = 20.0   # if one warmup run exceeds this, the cell thrashes under
-                     # memory pressure on this GPU -> mark 'slow', skip timing
+BUDGET_S    = 20.0   # one warmup slower than this -> cell thrashes -> 'slow'
 
-OUTPUT_PATH = os.path.join("experiments", "results", "exp1_layout_comparison.csv")
+OUTPUT_PATH = os.path.join("experiments", "results", "exp2_block_size_sweep.csv")
 FIELDNAMES  = ["cache_type", "seq_len", "batch", "block_size", "status",
                "ttft_ms", "tpot_ms", "throughput", "throughput_cv",
                "peak_memory_mb", "cache_memory_mb", "frag_ratio"]
 
 
-def make_cache(cache_type, model_config, batch_size, max_seq_len, device, io_dtype):
-    """Both caches use the model dtype so a comparison isolates layout (not
-    precision). Paged gets a shared pool sized for all `batch_size` seqs."""
-    if cache_type == "contiguous":
-        return ContiguousKVCache(model_config, max_seq_len, device, dtype=io_dtype)
-    per_seq_blocks = (max_seq_len + BLOCK_SIZE - 1) // BLOCK_SIZE
+def make_paged(model_config, batch, max_seq_len, block_size, device, dtype):
+    per_seq_blocks = (max_seq_len + block_size - 1) // block_size
     return PagedKVCache(
         n_layers=model_config.n_layers,
         n_heads=model_config.n_heads,
         dim_head=model_config.head_dim,
-        block_size=BLOCK_SIZE,
-        num_blocks=per_seq_blocks * batch_size,  # shared pool across all seqs
+        block_size=block_size,
+        num_blocks=per_seq_blocks * batch,   # shared pool across all seqs
         device=device,
-        dtype=io_dtype,
+        dtype=dtype,
     )
 
 
-def measure_cache_memory_frag(cache_type, model_config, batch, max_seq_len, final_len, device, io_dtype):
-    """Fill a throwaway cache to the run's final state and read its OWN
-    memory_bytes()/fragmentation_ratio() — exact (deterministic, uniform
-    lengths) and uses each cache's accounting as the single source of truth.
-
-    Done out-of-band because controller.generate() frees every seq at cleanup,
-    so the live cache is empty by the time metrics are reported.
-    """
-    cache = make_cache(cache_type, model_config, batch, max_seq_len, device, io_dtype)
+def measure_cache_memory_frag(model_config, batch, max_seq_len, block_size, final_len, device, dtype):
+    """Fill a throwaway paged cache to the run's final state and read its OWN
+    memory_bytes()/fragmentation_ratio() — exact and dtype-correct. Done
+    out-of-band because controller.generate() frees every seq at cleanup."""
+    cache = make_paged(model_config, batch, max_seq_len, block_size, device, dtype)
     dummy = torch.zeros(model_config.n_heads, final_len, model_config.head_dim,
-                        device=device, dtype=io_dtype)
+                        device=device, dtype=dtype)
     for b in range(batch):
-        cache.write(0, b, dummy, dummy)   # layer 0 is enough: allocates full reservation
+        cache.write(0, b, dummy, dummy)
         cache.advance(b, final_len)
     mem_mb = cache.memory_bytes() / (1024 * 1024)
     frag = cache.fragmentation_ratio(0)   # uniform lengths -> identical across seqs
@@ -76,49 +77,45 @@ def run_one(model, model_config, cache, prompt_ids):
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Running on: {device}  |  model: {N_LAYERS}L/{N_HEADS}H/{D_MODEL}d")
+    print(f"Running on: {device}  |  model: {N_LAYERS}L/{N_HEADS}H/{D_MODEL}d  |  FP16, paged only")
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     results = []
 
-    for cache_type in ["contiguous", "paged"]:
+    for block_size in BLOCK_SIZES:
         for seq_len in SEQ_LENS:
             for batch in BATCH_SIZES:
                 max_seq_len = seq_len + DECODE_LEN
                 final_len = seq_len + DECODE_LEN
                 model_config = ModelConfig(max_seq_len=max_seq_len, n_layers=N_LAYERS,
                                            n_heads=N_HEADS, d_model=D_MODEL, d_ff=D_FF)
-                model = GPTModel(model_config).to(device)
+                model = GPTModel(model_config).to(device).half()   # FP16
                 io_dtype = next(model.parameters()).dtype
                 prompt_ids = torch.randint(0, model_config.vocab_size, (batch, seq_len), device=device)
 
-                # memory + frag are deterministic and cheap (no forward) -> always reported
-                base = {
-                    "cache_type": cache_type, "seq_len": seq_len, "batch": batch,
-                    "block_size": BLOCK_SIZE if cache_type == "paged" else "N/A",
-                }
+                base = {"cache_type": "paged", "seq_len": seq_len, "batch": batch,
+                        "block_size": block_size}
                 blank_timing = {"ttft_ms": "", "tpot_ms": "", "throughput": "",
                                 "throughput_cv": "", "peak_memory_mb": ""}
                 try:
                     cache_mem_mb, frag = measure_cache_memory_frag(
-                        cache_type, model_config, batch, max_seq_len, final_len, device, io_dtype)
+                        model_config, batch, max_seq_len, block_size, final_len, device, io_dtype)
                     base.update(cache_memory_mb=cache_mem_mb, frag_ratio=frag)
 
-                    # one timed warmup: if the cell thrashes, bail before the 20-run loop
                     t0 = time.perf_counter()
                     run_one(model, model_config,
-                            make_cache(cache_type, model_config, batch, max_seq_len, device, io_dtype),
+                            make_paged(model_config, batch, max_seq_len, block_size, device, io_dtype),
                             prompt_ids)
                     if time.perf_counter() - t0 > BUDGET_S:
                         row = {**base, "status": "slow", **blank_timing}
                     else:
                         for _ in range(N_WARMUP - 1):
                             run_one(model, model_config,
-                                    make_cache(cache_type, model_config, batch, max_seq_len, device, io_dtype),
+                                    make_paged(model_config, batch, max_seq_len, block_size, device, io_dtype),
                                     prompt_ids)
                         metrics_list = []
                         for _ in range(N_MEASURE):
-                            cache = make_cache(cache_type, model_config, batch, max_seq_len, device, io_dtype)
+                            cache = make_paged(model_config, batch, max_seq_len, block_size, device, io_dtype)
                             metrics_list.append(run_one(model, model_config, cache, prompt_ids).metrics)
 
                         throughputs = [m.throughput_tokens_per_sec for m in metrics_list]

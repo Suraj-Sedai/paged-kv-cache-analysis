@@ -49,8 +49,9 @@ class ContiguousKVCache(BaseKVCache):
         self.seq_len.pop(seq_id, None); self.filled.pop(seq_id, None)
 
     def memory_bytes(self):
-        per = self.n_layers * self.n_heads * self.max_seq_len * self.head_dim * 2  # fp16
-        return 2 * len(self.k) * per
+        elem = torch.empty((), dtype=self.dtype).element_size()   # dtype-accurate, matches paged
+        per = self.n_layers * self.n_heads * self.max_seq_len * self.head_dim * elem
+        return 2 * len(self.k) * per   # k + v
 
     def fragmentation_ratio(self, seq_id):
         if seq_id not in self.seq_len:

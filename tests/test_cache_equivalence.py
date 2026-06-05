@@ -26,6 +26,8 @@ def contiguous(cfg):
 
 @pytest.fixture
 def paged(cfg):
+    # float32 to match the contiguous fixture: equivalence is a LAYOUT check,
+    # so precision must be held constant across both caches.
     return PagedKVCache(
         n_layers=N_LAYERS,
         n_heads=N_HEADS,
@@ -33,7 +35,7 @@ def paged(cfg):
         block_size=PAGE_SIZE,
         num_blocks=NUM_PAGES,
         device="cpu",
-        dtype=torch.float16,
+        dtype=torch.float32,
     )
 
 

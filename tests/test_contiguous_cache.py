@@ -132,8 +132,8 @@ def test_memory_bytes_empty(cache):
 
 def test_memory_bytes_counts_live_sequences(cache, cfg):
     # reserved per seq: n_layers * n_heads * max_seq_len * head_dim slots,
-    # @ 2 bytes (fp16 accounting), times 2 for k + v.
-    per_seq = N_LAYERS * N_HEADS * MAX_SEQ * cfg.head_dim * 2
+    # dtype-sized, times 2 for k + v.
+    per_seq = N_LAYERS * N_HEADS * MAX_SEQ * cfg.head_dim * torch.empty((), dtype=cache.dtype).element_size()
     cache.write(0, 0, *rand_kv(4, cfg.head_dim))
     assert cache.memory_bytes() == 2 * 1 * per_seq
     cache.write(0, 1, *rand_kv(4, cfg.head_dim))

@@ -13,8 +13,8 @@ SEQ_ID    = 0
 
 @pytest.fixture
 def cache():
-    # dtype must be float16 (page storage); read() returns the live tensors,
-    # which keep the written dtype, so float32 inputs round-trip exactly.
+    # float32 page storage so float32 inputs round-trip exactly through the
+    # gather read() (dtype held constant; precision is a separate experiment).
     return PagedKVCache(
         n_layers=N_LAYERS,
         n_heads=N_HEADS,
@@ -22,7 +22,7 @@ def cache():
         block_size=PAGE_SIZE,
         num_blocks=NUM_PAGES,
         device="cpu",
-        dtype=torch.float16,
+        dtype=torch.float32,
     )
 
 
@@ -115,9 +115,9 @@ def test_memory_bytes_empty(cache):
 
 
 def test_memory_bytes_counts_held_pages(cache):
-    # per page: n_layers * n_heads * page_size * head_dim slots @ 2 bytes (fp16),
+    # per page: n_layers * n_heads * page_size * head_dim slots, dtype-sized,
     # times 2 for k + v pools.
-    per_page = N_LAYERS * N_HEADS * PAGE_SIZE * HEAD_DIM * 2
+    per_page = N_LAYERS * N_HEADS * PAGE_SIZE * HEAD_DIM * cache.k_pages.element_size()
     cache.write(0, SEQ_ID, *rand_kv(6))   # 2 pages held
     assert cache.memory_bytes() == 2 * 2 * per_page
 
