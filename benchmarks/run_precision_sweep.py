@@ -1,8 +1,9 @@
 """Experiment 3a — precision sweep: FP16-paged vs INT8-paged (memory frontier).
 
-The H3 lever is memory. INT8 stores the KV cache at ~0.53x the FP16 bytes (int8
-data + a small fp16 per-token scale tax), so for the same workload it should:
-  (1) report a deterministic ~0.53x cache_memory_mb  — the GUARANTEED signal, and
+The H3 lever is memory. INT8 stores the KV cache at 0.516x the FP16 bytes (int8
+data + an fp16 per-token scale tax = (1 + 2/head_dim)/2 = 1.03125/2 at head_dim 64),
+so for the same workload it should:
+  (1) report a deterministic 0.516x cache_memory_mb  — the GUARANTEED signal, and
   (2) survive (seq_len x batch) regimes where FP16 hits OOM — the frontier shift,
       which is VRAM-dependent and only material insofar as the KV cache is a large
       share of total memory (model + activations + cache).
