@@ -9,9 +9,11 @@ Scheme: symmetric per-token. For each token's head_dim vector, scale = amax/127
 (zero-point free). The quantize math runs in fp32 to keep the amax/round step off
 the fp16 underflow floor; codes are int8, scales are stored fp16.
 
-Memory (the H3 lever): int8 data is ~0.5x the fp16 cache, plus a small scale tax
-of 2 bytes per token-head = 2/head_dim of the data (~3% at head_dim 64). The net
-~0.53x footprint is the headroom that should push the OOM frontier outward.
+Memory (the H3 lever): int8 data is 0.5x the fp16 cache, plus a scale tax of
+2 bytes per token-head = 2/head_dim of the data (~3% at head_dim 64). The net
+footprint is (1 + 2/head_dim)/2 = 0.516x at head_dim 64 — the headroom that should
+push the OOM frontier outward (but on an RTX 5070 Ti Laptop the cache is not the
+memory bottleneck, so the frontier does not move; see STATUS.md).
 
 Drop-in for PagedKVCache except the trailing arg is ``compute_dtype`` (the dtype
 read() returns / the model computes in) rather than storage ``dtype``.
