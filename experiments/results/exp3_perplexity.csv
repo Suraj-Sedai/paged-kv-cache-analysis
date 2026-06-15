@@ -1,0 +1,2 @@
+model,ctx,n_tokens,ppl_fp16,ppl_int8,ppl_delta,ppl_pct_increase,top1_agreement
+gpt2,512,1135,23.7315,23.7146,-0.0169,-0.071,0.9815
