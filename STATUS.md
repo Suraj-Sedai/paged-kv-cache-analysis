@@ -73,9 +73,10 @@ is cache-precision-independent. Halving 10% can't move the frontier.
 contaminated and NOT an intrinsic INT8 cost:
 - `INT8KVCache.read()` returns full history and re-dequantizes it every decode step
   (CLAUDE.md §4 invariant #5; inherited from PagedKVCache's full-history read).
-- The ratio is ~constant across seq_len (not climbing), so the tax is dominated by
-  extra per-step quant/dequant **kernel launches** in a launch-bound decode regime,
-  not by history-size dequant arithmetic.
+- The ratio does NOT climb with seq_len — it falls (~3.1x at seq 1024 to 1.33x at
+  8192). History-size dequant would make it grow; a fixed per-step cost shrinks as a
+  fraction as FP16's own per-step cost rises. So the tax is extra per-step quant/dequant
+  **kernel launches** in a launch-bound regime, not history-size dequant arithmetic.
 - A fused dequant-in-attention path would remove most of it. Report as harness/regime
   artifact, NOT "INT8 costs 2–3× decode latency". `read()` deliberately NOT refactored
   (§7: data is the critical path; refactor doesn't change memory/quality findings).
