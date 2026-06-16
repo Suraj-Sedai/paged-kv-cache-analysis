@@ -1,5 +1,7 @@
 # paged-kv-cache-analysis
 
+**Project case study:** https://surajsedai.com.np/projects/paged-kv-cache-analysis
+
 A reproducible measurement of **paged vs. contiguous KV cache** for transformer
 inference — when each layout wins, by how much, and how block size and cache
 precision move the line. This is a characterization study, not a new algorithm.
