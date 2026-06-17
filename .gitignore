@@ -89,3 +89,6 @@ secrets.json
 
 docs/
 CLAUDE.md
+
+# Local-only paper draft (kept private, not shared)
+paper/draft.md
