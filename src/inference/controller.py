@@ -96,7 +96,10 @@ class InferenceController:
                     generated_tokens=output[:, :prompt_len],
                     config=sampling_config,
                 )
-            decode_step_times_ms.append(first_sample_timer.elapsed_ms)
+            # NOTE: first_sample_timer is reported via first_sampling_latency_ms
+            # (folded into ttft_ms). It is a sampling-only timing with no forward
+            # pass, so it must NOT enter decode_step_times_ms — that list feeds
+            # tpot_* and decode_latency_ms, which measure forward decode steps.
 
             finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
