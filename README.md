@@ -96,12 +96,18 @@ latency is reported honestly but with that caveat attached.
 
 ## What I found
 
-- **Block size has an optimum at 8–16, and it's the headline.** Small blocks cut
-  fragmentation and, on this workload, also win throughput; 32 and 64 raise TPOT and
-  waste memory with nothing to show for it. At seq 1100 / batch 16, throughput falls
-  from ~400 tok/s at block 8 to ~240 at block 64, while last-block waste climbs toward
-  0.8 at the largest blocks. H2 holds, and the useful range sits at or below vLLM's
-  default of 16.
+- **Block size trades fragmentation against per-token cost — but throughput doesn't
+  name a stable winner.** The deterministic half of H2 holds in every run: small blocks
+  cut last-block waste (at seq 1100 / batch 16, block 8 holds fragmentation near 0 while
+  block 64 climbs toward 0.875) and they raise per-token lookup cost, so larger blocks
+  post the lower TPOT. The throughput ordering, though, did **not** survive a re-run. An
+  earlier sweep had small blocks (8–16) winning throughput; a later sweep on the same
+  model reversed it toward 32–64, with per-cell swings above 2× (e.g. block 32 at
+  seq 1100 / batch 16 went 227 → 495 tok/s). Decode here is launch-bound (see Method),
+  and a launch-bound throughput number is too noisy to crown a block size. So the honest
+  H2 result is the memory/fragmentation tradeoff, which is robust and reproducible; the
+  earlier "small blocks win throughput" headline did not reproduce, and I'm no longer
+  claiming it.
 
 - **INT8 KV is almost free on quality and exactly 0.516× on memory.** The cache shrinks
   to `(1 + 2/head_dim)/2` of FP16 — int8 data plus a per-token fp16 scale, dead
