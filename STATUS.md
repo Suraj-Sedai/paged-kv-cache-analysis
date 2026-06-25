@@ -12,7 +12,7 @@ Last updated: 2026-06-15 · commit `f7826fa` · GPU **NVIDIA RTX 5070 Ti Laptop*
 | exp | file | status |
 |-----|------|--------|
 | 1 — layout | `experiments/results/exp1_layout_comparison.csv` | done (real GPU) |
-| 2 — block size (H2) | `experiments/results/exp2_block_size_sweep.csv` | done; small block (8–16) wins frag+mem+throughput |
+| 2 — block size (H2) | `experiments/results/exp2_block_size_sweep.csv` | done; small block (8–16) wins frag+mem. Throughput ordering NOT reproducible across reruns (launch-bound) — claim withdrawn |
 | 3a — precision memory frontier (H3) | `experiments/results/exp3_precision_sweep.csv` | done; study GPTModel, paged FP16 vs INT8 |
 | 3b — precision quality (H3) | `experiments/results/exp3_perplexity.csv` | done; HF GPT-2 / gpt2-medium on WikiText-2 test |
 
@@ -44,12 +44,16 @@ both honest caveats not clean wins: (a) paged read copies (invariant #4), taxing
 (invariants #6/#7). So Exp 1 characterizes **the overhead cost of paged indirection when
 the memory benefit doesn't apply** — a defensible framing (§7), NOT "paged is worse".
 
-## Experiment 2 findings (H2: block-size optimum) — SUPPORTED
+## Experiment 2 findings (H2: block-size optimum) — MECHANISM SUPPORTED, THROUGHPUT CLAIM WITHDRAWN
 
-Block size ∈ {8,16,32,64}, frag_ratio now varies correctly (0.0–0.875). Small blocks
-(8–16) win fragmentation, memory AND throughput; 32–64 raise TPOT and waste memory with
-no upside. E.g. seq 1100 × batch 16: throughput ~400 (bs8) → ~240 (bs64); last-block
-waste climbs toward 0.8 at large blocks. Useful range at or below vLLM's default of 16.
+Block size ∈ {8,16,32,64}, frag_ratio varies correctly (0.0–0.875). Robust, deterministic
+half holds: small blocks (8–16) cut fragmentation/memory; large blocks lower TPOT (fewer
+per-token lookups). E.g. seq 1100 × batch 16: last-block waste ~0.0 (bs8) → 0.875 (bs64).
+
+Throughput ordering does NOT reproduce: an earlier sweep had bs8 ~400 / bs64 ~240 tok/s
+(small wins); a later rerun on the same model reversed it (bs32 227 → 495 tok/s, swings
+>2×). Decode is launch-bound, so throughput is too noisy to crown a block size. The
+"small blocks win throughput / use ≤16" headline is withdrawn — not reproducible.
 
 ## Experiment 3 findings (H3: does precision shift the crossover?)
 
