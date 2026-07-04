@@ -1,12 +1,5 @@
 # STATUS — volatile experiment state
 
-_Durable contract is CLAUDE.md. This file is the current run state; it rots, so trust
-the CSV + commit over memory._
-
-Last updated: 2026-06-15 · commit `f7826fa` · GPU **NVIDIA RTX 5070 Ti Laptop**
-
----
-
 ## Canonical CSVs
 
 | exp | file | status |
