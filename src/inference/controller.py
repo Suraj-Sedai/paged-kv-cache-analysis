@@ -73,6 +73,7 @@ class InferenceController:
             cache_dtype = next(self.model.parameters()).dtype
             cache = ContiguousKVCache(
                 config=self.config,
+                batch_size=batch_size,
                 max_seq_len=total_len,
                 device=device,
                 dtype=cache_dtype,
@@ -87,8 +88,7 @@ class InferenceController:
             with measure_ms(device) as prefill_timer:
                 logits = self.model(input_ids, kv_cache=cache, use_cache=use_cache, start_pos=0)
             if use_cache:
-                for b in range(batch_size):
-                    cache.advance(b, prompt_len)
+                cache.advance(prompt_len)
 
             with measure_ms(device) as first_sample_timer:
                 next_token = sample_next_token(
@@ -122,8 +122,7 @@ class InferenceController:
                         logits = self.model(
                             next_token, kv_cache=cache, use_cache=True, start_pos=position,
                         )
-                        for b in range(batch_size):
-                            cache.advance(b, 1)
+                        cache.advance(1)
                     else:
                         logits = self.model(output[:, :actual_len], use_cache=False)
                     next_token = sample_next_token(
@@ -135,8 +134,7 @@ class InferenceController:
 
             # ---- CLEANUP ----
             if use_cache:
-                for b in range(batch_size):
-                    cache.free(b)
+                cache.free()
 
         generation_end = now_seconds(device)
         num_generated_tokens = actual_len - prompt_len
