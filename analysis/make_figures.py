@@ -18,6 +18,11 @@ import matplotlib.pyplot as plt
 NUM = ["ttft_ms", "tpot_ms", "throughput", "throughput_cv",
        "peak_memory_mb", "cache_memory_mb", "frag_ratio"]
 
+# Mirrors DECODE_LEN in the benchmark scripts. Needed because frag_ratio is now
+# waste/allocation, so recovering absolute wasted slots requires the allocation,
+# and allocation depends on the final length (seq_len + DECODE_LEN). Keep in sync.
+DECODE_LEN = 60
+
 
 def find_results_dir():
     for base in [Path.cwd(), *Path.cwd().parents]:
@@ -63,8 +68,20 @@ def fig1_block_throughput(exp2, outdir):
 
 
 def fig2_fragmentation(exp2, outdir):
+    """Paged-only, single series (Exp 2 sweeps block size on the paged cache).
+
+    TODO (Prompt 3, trace harness): there is deliberately NO contiguous series
+    here. Under oracle reservation (max_seq_len == final length) contiguous
+    fragmentation is 0.0 by construction, so a contiguous-vs-paged comparison
+    would be vacuous, not favourable. Add it only once ReservationPolicy
+    (Oracle / FixedMax / Percentile) makes the reservation a real variable.
+    """
     ok = exp2[exp2.ok].copy()
-    ok["wasted_slots"] = ok["frag_ratio"] * ok["block_size"]
+    # frag_ratio is waste/allocation (not waste/block), so recover absolute
+    # wasted slots by multiplying through the allocation, not the block size.
+    final_len = ok["seq_len"] + DECODE_LEN
+    n_pages = np.ceil(final_len / ok["block_size"])
+    ok["wasted_slots"] = ok["frag_ratio"] * n_pages * ok["block_size"]
     blocks = sorted(ok.block_size.unique())
     waste = ok.groupby("block_size")["wasted_slots"].agg(["mean", "std"])
     colors = plt.cm.viridis(np.linspace(0.15, 0.85, len(blocks)))
