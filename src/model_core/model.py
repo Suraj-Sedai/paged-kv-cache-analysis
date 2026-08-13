@@ -30,5 +30,6 @@ class GPTModel(nn.Module):
                 x, kv_cache=kv_cache, layer_idx=layer_idx,
                 start_pos=start_pos, use_cache=use_cache,
             )
-
+        if not self.training and x.size(1) > 1:
+            x = x[:, -1:, :]          # only the last position is sampled from
         return self.lm_head(x)

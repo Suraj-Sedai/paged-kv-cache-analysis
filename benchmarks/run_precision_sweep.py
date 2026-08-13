@@ -52,7 +52,8 @@ def make_cache(cache_type, mc, batch, max_seq_len, device, io_dtype):
     per_seq_blocks = (max_seq_len + BLOCK_SIZE - 1) // BLOCK_SIZE
     num_blocks = per_seq_blocks * batch
     common = dict(n_layers=mc.n_layers, n_heads=mc.n_heads, dim_head=mc.head_dim,
-                  block_size=BLOCK_SIZE, num_blocks=num_blocks, device=device)
+                  block_size=BLOCK_SIZE, num_blocks=num_blocks,
+                  batch_size=batch, device=device)
     if cache_type == "paged_fp16":
         return PagedKVCache(**common, dtype=io_dtype)
     if cache_type == "paged_int8":
@@ -63,16 +64,22 @@ def make_cache(cache_type, mc, batch, max_seq_len, device, io_dtype):
 def measure_cache_memory_frag(cache_type, mc, batch, max_seq_len, final_len, device, io_dtype):
     """Fill a throwaway cache to final state and read its OWN memory_bytes() /
     fragmentation_ratio() — each cache's accounting is the source of truth, so the
-    int8 vs fp16 byte ratio is exact (and includes the int8 scale tax)."""
+    int8 vs fp16 byte ratio is exact (and includes the int8 scale tax).
+
+    Batched API: one write for the whole batch. Writing layer 0 only is enough —
+    a page spans all layers, so memory_bytes() already covers the full pool draw.
+    """
     cache = make_cache(cache_type, mc, batch, max_seq_len, device, io_dtype)
-    dummy = torch.zeros(mc.n_heads, final_len, mc.head_dim, device=device, dtype=io_dtype)
-    for b in range(batch):
-        cache.write(0, b, dummy, dummy)
-        cache.advance(b, final_len)
+    dummy = torch.zeros(batch, mc.n_heads, final_len, mc.head_dim,
+                        device=device, dtype=io_dtype)
+    cache.write(0, dummy, dummy)
+    cache.advance(final_len)
     mem_mb = cache.memory_bytes() / (1024 * 1024)
-    frag = cache.fragmentation_ratio(0)
-    for b in range(batch):
-        cache.free(b)
+    frag = cache.fragmentation_ratio()
+    cache.free()
+    del cache, dummy
+    if device == "cuda":
+        torch.cuda.empty_cache()
     return round(mem_mb, 2), round(frag, 4)
 
 
