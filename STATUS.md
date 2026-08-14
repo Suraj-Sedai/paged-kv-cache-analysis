@@ -1,94 +1,74 @@
-# STATUS — volatile experiment state
+# STATUS — working notes, 2026-08-13
 
-## Canonical CSVs
+Memory is the whole study now. The OOM frontier run (e414dee) is the last piece of
+new data: under enforced budgets INT8 survives three cells FP16 cannot, and peak
+memory turns out to be a function of `batch × seq_len` alone, fit to under 0.5% on
+held-out cells. Latency is out — decode is launch-bound at this model size and no
+timing claim has reproduced. Next is the architecture sweep, which is the one thing
+that would turn the memory model from a curve fit into a prediction.
 
-| exp | file | status |
-|-----|------|--------|
-| 1 — layout | `experiments/results/exp1_layout_comparison.csv` | done (real GPU) |
-| 2 — block size (H2) | `experiments/results/exp2_block_size_sweep.csv` | done; small block (8–16) wins frag+mem. Throughput ordering NOT reproducible across reruns (launch-bound) — claim withdrawn |
-| 3a — precision memory frontier (H3) | `experiments/results/exp3_precision_sweep.csv` | done; study GPTModel, paged FP16 vs INT8 |
-| 3b — precision quality (H3) | `experiments/results/exp3_perplexity.csv` | done; HF GPT-2 / gpt2-medium on WikiText-2 test |
+## Verified
 
-Corpus for 3b: `experiments/data/wikitext2_test.txt` (WikiText-2 raw test, 284,614 GPT-2 tokens).
+- Peak = f(batch × seq_len). 8192×32 vs 16384×16 within 0.058% (fp16), 8192×64 vs
+  16384×32 within 0.038% (int8) — `experiments/results/oom_frontier.json`.
+- Fits: fp16 27.15 KB/token + 168.0 MB, int8 19.93 + 164.0, R² ≥ 0.99997 on
+  `exp3_precision_sweep.csv`; held-out error +0.18% to +0.46% on the frontier cells.
+- Cache term matches `2·n_layers·n_heads·head_dim·bytes` = 16 KB/token fp16,
+  8.25 int8. Measured 16.125 at seq 8192 (surcharge is the 60 decode tokens).
+- H3 holds under a budget: FP16 OOM / INT8 ok at 8192×48 (9, 10 GB), 8192×64 and
+  16384×32 (11, 11.5 GB) — `oom_frontier.json` verdicts.
+- INT8 cache ratio 0.515627–0.515639 vs predicted 0.515625 —
+  `tests/test_cache_equivalence.py::test_int8_memory_ratio_is_0516`.
+- INT8 quality: +0.002% ppl (gpt2), +0.006% (gpt2-medium), 284,614 tokens —
+  `exp3_perplexity.csv`.
+- Equivalence gate green: `python -m pytest -q` → 56 passed.
 
-All experiments now have real GPU numbers — per CLAUDE.md §7 the critical path is
-satisfied. Remaining work is synthesis (plots + writeup), not more sweeps.
+## Next
 
----
+1. Architecture sweep. Fit the memory model at 3–4 model shapes (vary n_layers,
+   n_heads, head_dim independently) and check the measured slope against
+   `2·n_layers·n_heads·head_dim·bytes`. One shape is a fit; four is a model.
+2. Isolate the 7.5% of INT8 cache savings that never reach peak (0.58 KB/token,
+   steady across cells). Suspect the fp32/fp16 temporaries in `_quantize`/`read`.
+   Snapshot allocator stats per phase rather than guessing.
+3. Re-run exp2 under the current harness so the block-size fragmentation numbers
+   are on the current definition.
+4. Interleave cell execution order in the sweep scripts (see below) before any
+   re-run that will be quoted.
 
-## Done since last update (2026-06-15, commit f7826fa)
+## Known broken / not done
 
-- Exp 3b run on real corpus (WikiText-2 test, 284k tok) for gpt2 and gpt2-medium.
-  Dropped the throwaway 1,135-token smoke row (had wrong-sign delta, misleading).
-- Fixed `0.53x` → `0.516x` docstrings in `run_precision_sweep.py` and `int8_paged.py`.
-- Inspected `INT8KVCache.read()` for invariant #5 — confirmed present; decided caveat
-  not refactor (see Latency below).
-- Created this `STATUS.md`. Rewrote `README.md` (in-depth, real numbers, honest negatives).
-- Nothing committed yet — all working-tree edits.
+- `benchmarks/validity_gate.py` and `benchmarks/regen_v2.py` are on the v1 cache
+  API — positional `ContiguousKVCache(config, max_seq_len, device)` without
+  `batch_size`, and per-sequence `write(layer, b, k, v)` / `free(b)`. Both crash on
+  the batched interface. Not deleted; not run since fceab20.
+- No trace harness. It is the prerequisite for a real reservation policy
+  (Oracle / FixedMax / Percentile), referenced in `run_cache_comparison.py:87` and
+  `analysis/make_figures.py:73`.
+- Cell execution is not interleaved. All three sweeps loop cache_type (or
+  block_size) outermost, so one arm runs to completion before the other starts and
+  thermal drift lands entirely on the arm that runs last. Clocks are not locked.
+  This is a live confound for any A/B timing claim in these CSVs.
+- `exp2_block_size_sweep.csv` has not been regenerated since e383030 (2026-06-21).
+  It predates the batched interface, the SDPA switch, the lm_head slice and the
+  fragmentation redefinition. Its timing, peak_memory and frag_ratio columns are on
+  old semantics. Only cache_memory_mb carries over.
+- `analysis/notebooks/03_precision_analysis.ipynb` still prints "H3 NOT SUPPORTED".
+  It reads the sweep grid, where nothing OOMs; `oom_frontier.json` supersedes it.
+- `exp1_layout_comparison.csv` carries commit `fb29cd5-dirty` although it ships in
+  237ad2d. The stamp is the parent plus a dirty tree, not the commit that has it.
+- The GPU model is not recorded in any output file. `oom_frontier.py` prints the
+  device name but does not write it to the JSON.
 
----
+## Withdrawn claims
 
-## Experiment 1 findings (H1: layout crossover)
-
-Contiguous vs paged on the study model. On this GPU contiguous wins decode throughput
-across the tested grid (e.g. 128×16: contiguous ~1368 vs paged ~438 tok/s). Two reasons,
-both honest caveats not clean wins: (a) paged read copies (invariant #4), taxing TPOT;
-(b) uniform-length batched forward means paging's memory flexibility never surfaces
-(invariants #6/#7). So Exp 1 characterizes **the overhead cost of paged indirection when
-the memory benefit doesn't apply** — a defensible framing (§7), NOT "paged is worse".
-
-## Experiment 2 findings (H2: block-size optimum) — MECHANISM SUPPORTED, THROUGHPUT CLAIM WITHDRAWN
-
-Block size ∈ {8,16,32,64}, frag_ratio varies correctly (0.0–0.875). Robust, deterministic
-half holds: small blocks (8–16) cut fragmentation/memory; large blocks lower TPOT (fewer
-per-token lookups). E.g. seq 1100 × batch 16: last-block waste ~0.0 (bs8) → 0.875 (bs64).
-
-Throughput ordering does NOT reproduce: an earlier sweep had bs8 ~400 / bs64 ~240 tok/s
-(small wins); a later rerun on the same model reversed it (bs32 227 → 495 tok/s, swings
->2×). Decode is launch-bound, so throughput is too noisy to crown a block size. The
-"small blocks win throughput / use ≤16" headline is withdrawn — not reproducible.
-
-## Experiment 3 findings (H3: does precision shift the crossover?)
-
-**Memory (clean, deterministic):** INT8 cache = **0.516×** FP16 = `(1 + 2/head_dim)/2`
-at head_dim 64. Holds exactly across every (seq,batch) cell.
-
-**Quality (clean):** INT8 KV is effectively lossless on WikiText-2 test —
-| model | Δppl | % | top1 |
-|-------|------|---|------|
-| gpt2 | +0.0007 | +0.002% | 0.9854 |
-| gpt2-medium | +0.0016 | +0.006% | 0.9883 |
-Per-token-symmetric scheme holds at least to gpt2-medium; outlier-channel concern
-(KIVI/SmoothQuant) does not bite at this scale. Do not generalize past measured sizes.
-
-**OOM frontier (NEGATIVE — H3 falsified on this GPU):** INT8 OOMs at the *same* cells
-as FP16 (8192×16, 8192×32). Cache is ~10% of peak memory (e.g. 4096×16: cache 1040 MB
-vs peak 9872 MB); the OOM is set by prefill activation memory (batch×heads×seq²), which
-is cache-precision-independent. Halving 10% can't move the frontier.
-
-**Latency (CAVEAT, not a clean finding):** INT8 TPOT runs ~2–3× FP16. This is
-contaminated and NOT an intrinsic INT8 cost:
-- `INT8KVCache.read()` returns full history and re-dequantizes it every decode step
-  (CLAUDE.md §4 invariant #5; inherited from PagedKVCache's full-history read).
-- The ratio does NOT climb with seq_len — it falls (~3.1x at seq 1024 to 1.33x at
-  8192). History-size dequant would make it grow; a fixed per-step cost shrinks as a
-  fraction as FP16's own per-step cost rises. So the tax is extra per-step quant/dequant
-  **kernel launches** in a launch-bound regime, not history-size dequant arithmetic.
-- A fused dequant-in-attention path would remove most of it. Report as harness/regime
-  artifact, NOT "INT8 costs 2–3× decode latency". `read()` deliberately NOT refactored
-  (§7: data is the critical path; refactor doesn't change memory/quality findings).
-
-**Paper line for H3:** favorable memory↔quality (0.516× at ~0 quality cost), unfavorable
-memory↔latency, no OOM-frontier shift on this GPU. Keep INT8 a *sub-result* of the
-block-size paper, not a co-headline (the frontier-shift story we can't tell well here).
-
----
-
-### Notes / known non-issues
-
-- frag_ratio in 3a is constant 0.25 — informationless there (all seq_len multiples of
-  block_size 16, +60 decode → wasted=4/16). Correctly computed, NOT hardcoded; just
-  carries no signal in that aligned sweep. Drop it from any Exp-3 frag claim. (Exp 2's
-  frag_ratio does vary, 0.0–0.875, and is the valid one.)
-- README motivation paragraph is Claude's reconstruction of *why* — Suraj to verify it
-  matches his actual reasoning before the paper leans on it.
+- 2026-06-21 — "small blocks win throughput." Two runs of the same script gave
+  226.6 and 495.3 tok/s at block 32, 1100×16. Launch-bound; not reproducible.
+- 2026-08-12 — "contiguous fragments less than paged." Contiguous reserves the exact
+  final length, so 0.0 is the setup restated. Deferred to a reservation policy.
+- 2026-08-12 — H1, "paged overtakes contiguous somewhere in the grid." No crossover:
+  0.32×–0.77× throughput across 20 cells, peak equal within 0.9%. The grid cannot
+  show one — lockstep batch, copying read.
+- 2026-08-13 — "H3 is falsified on this GPU / the cache is ~10% of peak." That came
+  from the pre-lm_head-slice sweep, where an unsliced logits tensor was most of
+  peak. Cache share is 50–58% at the large cells and the frontier does move.
