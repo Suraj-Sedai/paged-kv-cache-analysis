@@ -7,10 +7,16 @@ to gather per read; larger blocks -> cheaper gather but coarser last-page waste.
 seq_lens are deliberately NON-multiples of the block sizes so fragmentation
 actually varies (powers of two give zero waste -> a flat, useless Figure 2).
 
-NOTE: decode on this GPU is launch-bound (see Exp 1, CV up to ~26%), so the
-fragmentation/memory columns are the clean signal; TPOT-vs-block_size may stay
-within the noise. A flat TPOT curve here is the known launch-bound regime, not
-a new bug.
+NOTE: decode on this GPU is launch-bound (throughput CV up to 42.59% in exp1,
+46.79% in exp3), so the fragmentation/memory columns are the clean signal;
+TPOT-vs-block_size may stay within the noise. A flat TPOT curve here is the known
+launch-bound regime, not a new bug.
+
+PORTED to the batched cache interface (fceab20). The CSV in the repo predates that
+port, the SDPA switch, the lm_head slice and the fragmentation redefinition, so its
+timing, peak_memory and frag_ratio columns are on old semantics. frag_ratio from
+this script is now waste over TOTAL allocation, not waste over the last block —
+values are ~n_pages smaller than the old file's and are not comparable to it.
 """
 import csv
 import os
@@ -48,6 +54,7 @@ def make_paged(model_config, batch, max_seq_len, block_size, device, dtype):
         dim_head=model_config.head_dim,
         block_size=block_size,
         num_blocks=per_seq_blocks * batch,   # shared pool across all seqs
+        batch_size=batch,
         device=device,
         dtype=dtype,
     )
@@ -56,17 +63,22 @@ def make_paged(model_config, batch, max_seq_len, block_size, device, dtype):
 def measure_cache_memory_frag(model_config, batch, max_seq_len, block_size, final_len, device, dtype):
     """Fill a throwaway paged cache to the run's final state and read its OWN
     memory_bytes()/fragmentation_ratio() — exact and dtype-correct. Done
-    out-of-band because controller.generate() frees every seq at cleanup."""
+    out-of-band because controller.generate() frees the cache at cleanup.
+
+    Batched API: one write for the whole batch. Writing layer 0 only is enough —
+    a page spans all layers, so memory_bytes() already covers the full pool draw.
+    """
     cache = make_paged(model_config, batch, max_seq_len, block_size, device, dtype)
-    dummy = torch.zeros(model_config.n_heads, final_len, model_config.head_dim,
+    dummy = torch.zeros(batch, model_config.n_heads, final_len, model_config.head_dim,
                         device=device, dtype=dtype)
-    for b in range(batch):
-        cache.write(0, b, dummy, dummy)
-        cache.advance(b, final_len)
+    cache.write(0, dummy, dummy)
+    cache.advance(final_len)
     mem_mb = cache.memory_bytes() / (1024 * 1024)
-    frag = cache.fragmentation_ratio(0)   # uniform lengths -> identical across seqs
-    for b in range(batch):
-        cache.free(b)
+    frag = cache.fragmentation_ratio()
+    cache.free()
+    del cache, dummy
+    if device == "cuda":
+        torch.cuda.empty_cache()
     return round(mem_mb, 2), round(frag, 4)
 
 
