@@ -14,8 +14,16 @@ seq_len,batch,fp16_status,int8_status
 4096,1,ok,ok
 4096,8,ok,ok
 4096,16,ok,ok
+<<<<<<< HEAD
 4096,32,ok,ok
 8192,1,ok,ok
 8192,8,ok,ok
 8192,16,ok,ok
 8192,32,ok,ok
+=======
+4096,32,slow,slow
+8192,1,ok,ok
+8192,8,slow,slow
+8192,16,oom,oom
+8192,32,oom,oom
+>>>>>>> 6e17cd93e54b5ac6af5354801251abdbb449a32d
