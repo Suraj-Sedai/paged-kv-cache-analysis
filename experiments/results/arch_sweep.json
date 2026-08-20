@@ -1,0 +1,146 @@
+[
+  {
+    "label": "baseline    8L/512d/2048ff",
+    "n_layers": 8,
+    "d_model": 512,
+    "n_heads": 8,
+    "d_ff": 2048,
+    "tokens": [
+      50176,
+      88064,
+      125952,
+      163840
+    ],
+    "peaks": [
+      1496.82763671875,
+      2502.369140625,
+      3515.17626953125,
+      4520.1083984375
+    ],
+    "slope_kb_per_token": 27.25,
+    "intercept_mb": 161.0,
+    "max_resid_mb": 2.42,
+    "predicted_cache_kb": 16.0,
+    "activation_kb": 11.25
+  },
+  {
+    "label": "2x layers  16L/512d/2048ff",
+    "n_layers": 16,
+    "d_model": 512,
+    "n_heads": 8,
+    "d_ff": 2048,
+    "tokens": [
+      31744,
+      55296,
+      78848,
+      103424
+    ],
+    "peaks": [
+      1558.51416015625,
+      2556.705078125,
+      3560.89599609375,
+      4605.09521484375
+    ],
+    "slope_kb_per_token": 43.536,
+    "intercept_mb": 207.8,
+    "max_resid_mb": 2.05,
+    "predicted_cache_kb": 32.0,
+    "activation_kb": 11.536
+  },
+  {
+    "label": "half layers 4L/512d/2048ff",
+    "n_layers": 4,
+    "d_model": 512,
+    "n_heads": 8,
+    "d_ff": 2048,
+    "tokens": [
+      71680,
+      125952,
+      179200,
+      233472
+    ],
+    "peaks": [
+      1473.435546875,
+      2491.12548828125,
+      3485.93994140625,
+      4496.5908203125
+    ],
+    "slope_kb_per_token": 19.134,
+    "intercept_mb": 135.9,
+    "max_resid_mb": 1.83,
+    "predicted_cache_kb": 8.0,
+    "activation_kb": 11.134
+  },
+  {
+    "label": "2x d_model  8L/1024d/2048ff",
+    "n_layers": 8,
+    "d_model": 1024,
+    "n_heads": 16,
+    "d_ff": 2048,
+    "tokens": [
+      25600,
+      44032,
+      63488,
+      81920
+    ],
+    "peaks": [
+      1498.74267578125,
+      2336.17333984375,
+      3221.1279296875,
+      4057.55859375
+    ],
+    "slope_kb_per_token": 46.53,
+    "intercept_mb": 335.6,
+    "max_resid_mb": 0.7,
+    "predicted_cache_kb": 32.0,
+    "activation_kb": 14.53
+  },
+  {
+    "label": "2x d_ff     8L/512d/4096ff",
+    "n_layers": 8,
+    "d_model": 512,
+    "n_heads": 8,
+    "d_ff": 4096,
+    "tokens": [
+      41984,
+      73728,
+      104448,
+      136192
+    ],
+    "peaks": [
+      1640.52685546875,
+      2730.7841796875,
+      3786.533203125,
+      4882.87646484375
+    ],
+    "slope_kb_per_token": 35.238,
+    "intercept_mb": 194.5,
+    "max_resid_mb": 2.22,
+    "predicted_cache_kb": 16.0,
+    "activation_kb": 19.238
+  },
+  {
+    "label": "gpt2-small 12L/768d/3072ff",
+    "n_layers": 12,
+    "d_model": 768,
+    "n_heads": 12,
+    "d_ff": 3072,
+    "tokens": [
+      23552,
+      41984,
+      60416,
+      77824
+    ],
+    "peaks": [
+      1556.2333984375,
+      2513.9453125,
+      3466.7822265625,
+      4370.23583984375
+    ],
+    "slope_kb_per_token": 53.078,
+    "intercept_mb": 336.2,
+    "max_resid_mb": 1.58,
+    "predicted_cache_kb": 36.0,
+    "activation_kb": 17.078
+  }
+]
